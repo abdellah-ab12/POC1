@@ -109,6 +109,47 @@ pipeline {
             }
         }
     }
+    stage('Signature de l\'image avec Cosign') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
+                    string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD')
+                ]) {
+                    script {
+                        def digest = sh(
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Digest à signer : ${digest}"
+
+                        sh """
+                            cosign sign --yes \
+                              --new-bundle-format=false \
+                              --use-signing-config=false \
+                              --registry-referrers-mode=legacy \
+                              --key \$COSIGN_KEY_FILE \
+                              ${digest}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Vérification de la signature') {
+            steps {
+                withCredentials([file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')]) {
+                    script {
+                        def digest = sh(
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            returnStdout: true
+                        ).trim()
+
+                        sh "cosign verify --key \$COSIGN_PUB_FILE ${digest}"
+                    }
+                }
+            }
+        }
 
     post {
         success {
