@@ -8,6 +8,7 @@ pipeline {
         IMAGE_TAG         = "${env.BUILD_NUMBER}"
         FULL_IMAGE        = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}"
         HARBOR_CREDS      = credentials('harbor-creds')
+        APP_DIR           = "SimpleGreetingApi"
     }
 
     stages {
@@ -20,13 +21,17 @@ pipeline {
 
         stage('Compilation de l\'application') {
             steps {
-                sh "docker build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
+                dir("${APP_DIR}") {
+                    sh "docker build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
+                }
             }
         }
 
         stage('Construction de l\'image Docker') {
             steps {
-                sh "docker build -t ${FULL_IMAGE} ."
+                dir("${APP_DIR}") {
+                    sh "docker build -t ${FULL_IMAGE} ."
+                }
             }
         }
 
