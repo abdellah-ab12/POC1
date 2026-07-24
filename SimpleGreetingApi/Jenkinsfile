@@ -108,8 +108,8 @@ pipeline {
                 }
             }
         }
-    }
-    stage('Signature de l\'image avec Cosign') {
+
+        stage('Signature de l\'image avec Cosign') {
             steps {
                 withCredentials([
                     file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
@@ -136,9 +136,11 @@ pipeline {
             }
         }
 
-        stage('Vérification de la signature') {
+        stage('Vérification de la signature Cosign') {
             steps {
-                withCredentials([file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')]) {
+                withCredentials([
+                    file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
+                ]) {
                     script {
                         def digest = sh(
                             script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
@@ -150,10 +152,11 @@ pipeline {
                 }
             }
         }
+    }
 
     post {
         success {
-            echo "Pipeline terminé avec succès : ${FULL_IMAGE} publiée et validée."
+            echo "Pipeline terminé avec succès : ${FULL_IMAGE} publiée, scannée et signée."
         }
         failure {
             echo "Pipeline échoué — voir les logs ci-dessus pour la cause."
