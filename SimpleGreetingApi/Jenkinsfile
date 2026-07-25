@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent { label 'docker-build' }
 
     environment {
         HARBOR_REGISTRY   = "192.168.88.143"
