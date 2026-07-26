@@ -27,53 +27,20 @@ pipeline {
             }
         }
 
-        stage('Construction de l\'image Docker') {
+        stage('Construction de l\'image Docker (locale)') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "docker build -t ${FULL_IMAGE} ."
+                    sh "docker build -t ${LOCAL_IMAGE} ."
                 }
             }
         }
 
-        stage('Déclenchement du scan Trivy') {
+        stage('Scan Trivy local (avant publication)') {
             steps {
                 sh """
-                    curl -s -u \$HARBOR_CREDS_USR:\$HARBOR_CREDS_PSW -X POST \
-                    http://${HARBOR_REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${IMAGE_TAG}/scan
+                    trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}
                 """
-            }
-        }
-
-        stage('Attente de la fin du scan') {
-            steps {
-                script {
-                    def maxAttempts = 30
-                    def attempt = 0
-                    def scanStatus = ""
-
-                    while (attempt < maxAttempts) {
-                        scanStatus = sh(
-                            script: """
-                                curl -s -u \$HARBOR_CREDS_USR:\$HARBOR_CREDS_PSW \
-                                "http://${HARBOR_REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${IMAGE_TAG}?with_scan_overview=true" \
-                                | python3 -c "import sys,json; d=json.load(sys.stdin); ov=d.get('scan_overview',{}); v=list(ov.values()); print(v[0]['scan_status'] if v else 'Pending')"
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        echo "Statut du scan (tentative ${attempt + 1}/${maxAttempts}) : ${scanStatus}"
-
-                        if (scanStatus == "Success" || scanStatus == "Error") {
-                            break
-                        }
-                        sleep(time: 10, unit: 'SECONDS')
-                        attempt++
-                    }
-
-                    if (scanStatus != "Success") {
-                        error "Le scan Trivy n'a pas abouti correctement (statut final : ${scanStatus})"
-                    }
-                }
+                archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
             }
         }
 
@@ -82,9 +49,16 @@ pipeline {
                 script {
                     def criticalCount = sh(
                         script: """
-                            curl -s -u \$HARBOR_CREDS_USR:\$HARBOR_CREDS_PSW \
-                            "http://${HARBOR_REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${IMAGE_NAME}/artifacts/${IMAGE_TAG}?with_scan_overview=true" \
-                            | python3 -c "import sys,json; d=json.load(sys.stdin); ov=d.get('scan_overview',{}); v=list(ov.values()); print(v[0]['summary']['summary'].get('Critical',0) if v else 0)"
+                            cat trivy-report.json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = 0
+for result in data.get('Results', []):
+    for vuln in result.get('Vulnerabilities', []) or []:
+        if vuln.get('Severity') == 'CRITICAL':
+            count += 1
+print(count)
+"
                         """,
                         returnStdout: true
                     ).trim().toInteger()
@@ -92,9 +66,9 @@ pipeline {
                     echo "Nombre de vulnérabilités Critical détectées : ${criticalCount}"
 
                     if (criticalCount > 0) {
-                        error "Quality Gate échoué : ${criticalCount} vulnérabilité(s) Critical détectée(s). Publication bloquée."
+                        error "Quality Gate échoué : ${criticalCount} vulnérabilité(s) Critical détectée(s). Image NON publiée vers Harbor."
                     } else {
-                        echo "Quality Gate validé : aucune vulnérabilité Critical. Image conforme."
+                        echo "Quality Gate validé : aucune vulnérabilité Critical. Publication autorisée."
                     }
                 }
             }
@@ -103,6 +77,7 @@ pipeline {
         stage('Publication de l\'image vers Harbor') {
             steps {
                 sh """
+                    docker tag ${LOCAL_IMAGE} ${FULL_IMAGE}
                     echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
                     docker push ${FULL_IMAGE}
                 """
@@ -124,6 +99,7 @@ pipeline {
                         echo "Digest à signer : ${digest}"
 
                         sh """
+                            export COSIGN_PASSWORD=\$COSIGN_PASSWORD
                             cosign sign --yes \
                               --new-bundle-format=false \
                               --use-signing-config=false \
@@ -156,10 +132,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline terminé avec succès : ${FULL_IMAGE} publiée, scannée et signée."
+            echo "Pipeline terminé avec succès : ${FULL_IMAGE} scannée, publiée et signée."
         }
         failure {
-            echo "Pipeline échoué — voir les logs ci-dessus pour la cause."
+            echo "Pipeline échoué — l'image n'a PAS été publiée vers Harbor."
         }
         always {
             sh "docker logout ${HARBOR_REGISTRY} || true"
