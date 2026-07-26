@@ -2,14 +2,15 @@ pipeline {
     agent { label 'test-server' }
 
     environment {
-        HARBOR_REGISTRY   = "192.168.88.143"
-        HARBOR_PROJECT    = "poc1"
-        IMAGE_NAME        = "simplegreetingapi"
-        IMAGE_TAG         = "${env.BUILD_NUMBER}"
-        FULL_IMAGE        = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}"
-        HARBOR_CREDS      = credentials('harbor-creds')
-        APP_DIR           = "SimpleGreetingApi"
-    }
+    HARBOR_REGISTRY   = "192.168.88.143"
+    HARBOR_PROJECT    = "poc1"
+    IMAGE_NAME        = "simplegreetingapi"
+    IMAGE_TAG         = "${env.BUILD_NUMBER}"
+    LOCAL_IMAGE       = "${IMAGE_NAME}:${IMAGE_TAG}"
+    FULL_IMAGE        = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}"
+    HARBOR_CREDS      = credentials('harbor-creds')
+    APP_DIR           = "SimpleGreetingApi"
+}
 
     stages {
 
