@@ -35,15 +35,6 @@ pipeline {
             }
         }
 
-        stage('Publication de l\'image vers Harbor') {
-            steps {
-                sh """
-                    echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
-                    docker push ${FULL_IMAGE}
-                """
-            }
-        }
-
         stage('Déclenchement du scan Trivy') {
             steps {
                 sh """
@@ -106,6 +97,15 @@ pipeline {
                         echo "Quality Gate validé : aucune vulnérabilité Critical. Image conforme."
                     }
                 }
+            }
+        }
+
+        stage('Publication de l\'image vers Harbor') {
+            steps {
+                sh """
+                    echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
+                    docker push ${FULL_IMAGE}
+                """
             }
         }
 
