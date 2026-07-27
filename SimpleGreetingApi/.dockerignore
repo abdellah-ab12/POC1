@@ -1,0 +1,9 @@
+bin/
+obj/
+out/
+*.log
+.git/
+.gitignore
+.vs/
+.vscode/
+*.user

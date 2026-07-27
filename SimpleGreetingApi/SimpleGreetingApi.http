@@ -1,0 +1,6 @@
+@SimpleGreetingApi_HostAddress = http://localhost:5023
+
+GET {{SimpleGreetingApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
