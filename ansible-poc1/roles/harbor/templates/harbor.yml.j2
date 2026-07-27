@@ -1,0 +1,42 @@
+hostname: {{ harbor_hostname }}
+
+http:
+  port: 80
+
+harbor_admin_password: {{ harbor_admin_password }}
+
+# https:
+#   port: 443
+#   certificate: /your/certificate/path
+#   private_key: /your/private/key/path
+
+data_volume: /data
+
+trivy:
+  ignore_unfixed: false
+  skip_update: false
+
+database:
+  password: root123
+  max_idle_conns: 100
+  max_open_conns: 900
+
+jobservice:
+  max_job_workers: 10
+  job_loggers:
+    - STD_OUTPUT
+    - FILE
+  logger_sweeper_duration: 1
+
+notification:
+  webhook_job_max_retry: 3
+  webhook_job_http_client_timeout: 3
+
+log:
+  level: info
+  local:
+    rotate_count: 50
+    rotate_size: 200M
+    location: /var/log/harbor
+
+_version: 2.11.0

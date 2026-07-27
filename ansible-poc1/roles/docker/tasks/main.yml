@@ -1,0 +1,80 @@
+---
+- name: Installer les prérequis
+  apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+  become: true
+
+- name: Créer le répertoire pour les clés APT
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Vérifier si la clé GPG Docker existe déjà
+  stat:
+    path: /etc/apt/keyrings/docker.gpg
+  register: docker_gpg_key
+
+- name: Télécharger et ajouter la clé GPG Docker
+  shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  become: true
+  when: not docker_gpg_key.stat.exists
+
+- name: Donner les droits de lecture sur la clé GPG
+  file:
+    path: /etc/apt/keyrings/docker.gpg
+    mode: '0644'
+  become: true
+
+- name: Récupérer l'architecture du système
+  command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+
+- name: Récupérer le nom de code Ubuntu
+  shell: . /etc/os-release && echo "$VERSION_CODENAME"
+  register: ubuntu_codename
+  changed_when: false
+
+- name: Ajouter le dépôt Docker
+  copy:
+    dest: /etc/apt/sources.list.d/docker.list
+    content: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ubuntu_codename.stdout }} stable\n"
+  become: true
+
+- name: Mettre à jour le cache apt
+  apt:
+    update_cache: true
+  become: true
+
+- name: Installer Docker Engine et Docker Compose
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+  become: true
+
+- name: Ajouter l'utilisateur au groupe docker
+  user:
+    name: "{{ ansible_user_id }}"
+    groups: docker
+    append: true
+  become: true
+
+- name: Vérifier la version de Docker
+  command: docker --version
+  register: docker_version
+  changed_when: false
+
+- name: Afficher la version de Docker
+  debug:
+    msg: "Docker installé : {{ docker_version.stdout }}"
