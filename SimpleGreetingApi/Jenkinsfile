@@ -32,7 +32,7 @@ pipeline {
         stage('Compilation de l\'application') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "docker build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
+                    sh "sudo nerdctl build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
                 }
             }
         }
@@ -40,7 +40,7 @@ pipeline {
         stage('Construction de l\'image Docker (locale)') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "docker build -t ${LOCAL_IMAGE} ."
+                    sh "sudo nerdctl build -t ${LOCAL_IMAGE} ."
                 }
             }
         }
@@ -85,9 +85,9 @@ print(count)
         stage('Publication de l\'image vers Harbor') {
             steps {
                 sh """
-                    docker tag ${LOCAL_IMAGE} ${FULL_IMAGE}
-                    echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
-                    docker push ${FULL_IMAGE}
+                    sudo nerdctl tag ${LOCAL_IMAGE} ${FULL_IMAGE}
+                    echo \$HARBOR_CREDS_PSW | sudo nerdctl login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
+                    sudo nerdctl push ${FULL_IMAGE}
                 """
             }
         }
@@ -100,7 +100,7 @@ print(count)
                 ]) {
                     script {
                         def digest = sh(
-                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            script: "sudo nerdctl inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
                             returnStdout: true
                         ).trim()
 
@@ -127,7 +127,7 @@ print(count)
                 ]) {
                     script {
                         def digest = sh(
-                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            script: "sudo nerdctl inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
                             returnStdout: true
                         ).trim()
 
@@ -157,7 +157,7 @@ print(count)
             echo "Pipeline échoué — vérifier à quelle étape (build, scan, publication, signature ou déploiement K8s)."
         }
         always {
-            sh "docker logout ${HARBOR_REGISTRY} || true"
+            sh "sudo nerdctl logout ${HARBOR_REGISTRY} || true"
         }
     }
 }
