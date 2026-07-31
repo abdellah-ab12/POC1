@@ -7,6 +7,8 @@ pipeline {
         IMAGE_NAME        = "simplegreetingapi"
         HARBOR_CREDS      = credentials('harbor-creds')
         APP_DIR           = "SimpleGreetingApi"
+        K8S_NAMESPACE     = "poc3"
+        K8S_DEPLOYMENT    = "simplegreetingapi"
     }
 
     stages {
@@ -134,14 +136,25 @@ print(count)
                 }
             }
         }
+
+        stage('Déploiement sur Kubernetes') {
+            steps {
+                sh """
+                    kubectl apply -f k8s/namespace.yaml
+                    kubectl apply -f k8s/service.yaml
+                    kubectl set image deployment/${K8S_DEPLOYMENT} ${IMAGE_NAME}=${FULL_IMAGE} -n ${K8S_NAMESPACE} --record
+                    kubectl rollout status deployment/${K8S_DEPLOYMENT} -n ${K8S_NAMESPACE} --timeout=120s
+                """
+            }
+        }
     }
 
     post {
         success {
-            echo "Pipeline terminé avec succès : ${FULL_IMAGE} scannée, publiée et signée."
+            echo "Pipeline terminé avec succès : ${FULL_IMAGE} scannée, publiée, signée et déployée sur Kubernetes."
         }
         failure {
-            echo "Pipeline échoué — l'image n'a PAS été publiée vers Harbor."
+            echo "Pipeline échoué — vérifier à quelle étape (build, scan, publication, signature ou déploiement K8s)."
         }
         always {
             sh "docker logout ${HARBOR_REGISTRY} || true"
