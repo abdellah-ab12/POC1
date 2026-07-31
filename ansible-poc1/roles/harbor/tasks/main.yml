@@ -1,0 +1,74 @@
+---
+- name: Vérifier si Harbor est déjà téléchargé
+  stat:
+    path: "{{ harbor_install_dir }}/install.sh"
+  register: harbor_installer
+- name: Télécharger l'archive d'installation Harbor
+  get_url:
+    url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-installer-{{ harbor_version }}.tgz"
+    dest: "/home/{{ ansible_user_id }}/harbor-online-installer-{{ harbor_version }}.tgz"
+  when: not harbor_installer.stat.exists
+- name: Extraire l'archive Harbor
+  unarchive:
+    src: "/home/{{ ansible_user_id }}/harbor-online-installer-{{ harbor_version }}.tgz"
+    dest: "/home/{{ ansible_user_id }}/"
+    remote_src: true
+  when: not harbor_installer.stat.exists
+- name: Déployer le fichier harbor.yml
+  template:
+    src: harbor.yml.j2
+    dest: "{{ harbor_install_dir }}/harbor.yml"
+    mode: '0600'
+- name: Vérifier si Harbor tourne déjà
+  shell: docker ps --filter "name=harbor-core" --format "{{ '{{.Names}}' }}"
+  register: harbor_running
+  changed_when: false
+  become: true
+- name: Installer Harbor avec Trivy
+  command: ./install.sh --with-trivy
+  args:
+    chdir: "{{ harbor_install_dir }}"
+  become: true
+  when: harbor_running.stdout == ""
+  register: harbor_install_result
+- name: "harbor : Pause initiale avant vérification de harbor-log"
+  ansible.builtin.pause:
+    seconds: 8
+- name: "harbor : Attendre que le port de logging syslog (1514) soit disponible"
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 1514
+    delay: 2
+    timeout: 60
+  become: true
+- name: "harbor : Vérifier l'état de tous les conteneurs Harbor"
+  ansible.builtin.command: docker compose ps --format json
+  args:
+    chdir: "{{ harbor_install_dir }}"
+  register: harbor_ps_check
+  changed_when: false
+  become: true
+- name: "harbor : Relancer les conteneurs non démarrés (race condition logging)"
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ harbor_install_dir }}"
+  register: harbor_recovery
+  when: "'Exited' in harbor_ps_check.stdout or 'exited' in harbor_ps_check.stdout"
+  changed_when: true
+  become: true
+- name: "harbor : Pause de stabilisation"
+  ansible.builtin.pause:
+    seconds: 10
+  when: harbor_recovery is changed
+- name: "harbor : Vérification finale - tous les conteneurs healthy"
+  ansible.builtin.command: docker compose ps --format json
+  args:
+    chdir: "{{ harbor_install_dir }}"
+  register: harbor_final_check
+  changed_when: false
+  failed_when: "'Exited' in harbor_final_check.stdout or 'exited' in harbor_final_check.stdout"
+  become: true
+- name: Afficher le résultat de l'installation Harbor
+  debug:
+    var: harbor_install_result.stdout_lines
+  when: harbor_install_result is defined and harbor_install_result.stdout_lines is defined

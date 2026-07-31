@@ -1,0 +1,150 @@
+pipeline {
+    agent { label 'test-server' }
+
+    environment {
+        HARBOR_REGISTRY   = "192.168.88.143"
+        HARBOR_PROJECT    = "poc1"
+        IMAGE_NAME        = "simplegreetingapi"
+        HARBOR_CREDS      = credentials('harbor-creds')
+        APP_DIR           = "SimpleGreetingApi"
+    }
+
+    stages {
+
+        stage('Initialisation des variables') {
+            steps {
+                script {
+                    env.IMAGE_TAG   = "${env.BUILD_NUMBER}"
+                    env.LOCAL_IMAGE = "${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                    env.FULL_IMAGE  = "${env.HARBOR_REGISTRY}/${env.HARBOR_PROJECT}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Récupération du code source') {
+            steps {
+                git branch: 'main', url: 'https://github.com/abdellah-ab12/POC1.git'
+            }
+        }
+
+        stage('Compilation de l\'application') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh "docker build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
+                }
+            }
+        }
+
+        stage('Construction de l\'image Docker (locale)') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh "docker build -t ${LOCAL_IMAGE} ."
+                }
+            }
+        }
+
+        stage('Scan Trivy local (avant publication)') {
+            steps {
+                sh "trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}"
+                archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+            }
+        }
+
+        stage('Quality Gate — vérification des vulnérabilités critiques') {
+            steps {
+                script {
+                    def criticalCount = sh(
+                        script: """
+                            cat trivy-report.json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = 0
+for result in data.get('Results', []):
+    for vuln in result.get('Vulnerabilities', []) or []:
+        if vuln.get('Severity') == 'CRITICAL':
+            count += 1
+print(count)
+"
+                        """,
+                        returnStdout: true
+                    ).trim().toInteger()
+
+                    echo "Nombre de vulnérabilités Critical détectées : ${criticalCount}"
+
+                    if (criticalCount > 0) {
+                        error "Quality Gate échoué : ${criticalCount} vulnérabilité(s) Critical détectée(s). Image NON publiée vers Harbor."
+                    } else {
+                        echo "Quality Gate validé : aucune vulnérabilité Critical. Publication autorisée."
+                    }
+                }
+            }
+        }
+
+        stage('Publication de l\'image vers Harbor') {
+            steps {
+                sh """
+                    docker tag ${LOCAL_IMAGE} ${FULL_IMAGE}
+                    echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
+                    docker push ${FULL_IMAGE}
+                """
+            }
+        }
+
+        stage('Signature de l\'image avec Cosign') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
+                    string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD')
+                ]) {
+                    script {
+                        def digest = sh(
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Digest à signer : ${digest}"
+
+                        sh """
+                            export COSIGN_PASSWORD=\$COSIGN_PASSWORD
+                            cosign sign --yes \
+                              --new-bundle-format=false \
+                              --use-signing-config=false \
+                              --registry-referrers-mode=legacy \
+                              --key \$COSIGN_KEY_FILE \
+                              ${digest}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Vérification de la signature Cosign') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
+                ]) {
+                    script {
+                        def digest = sh(
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            returnStdout: true
+                        ).trim()
+
+                        sh "cosign verify --key \$COSIGN_PUB_FILE ${digest}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline terminé avec succès : ${FULL_IMAGE} scannée, publiée et signée."
+        }
+        failure {
+            echo "Pipeline échoué — l'image n'a PAS été publiée vers Harbor."
+        }
+        always {
+            sh "docker logout ${HARBOR_REGISTRY} || true"
+        }
+    }
+}

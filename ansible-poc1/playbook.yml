@@ -1,0 +1,10 @@
+---
+- name: Installation automatisée du POC-1 (SDK .NET, Docker, Harbor,Jenkins)
+  hosts: poc1
+  become: false
+
+  roles:
+    - dotnet
+    - docker
+    - harbor
+    - jenkins

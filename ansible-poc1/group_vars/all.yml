@@ -1,0 +1,8 @@
+harbor_version: "v2.11.0"
+harbor_hostname: "192.168.88.144"
+harbor_admin_password: "Harbor12345"
+harbor_install_dir: "/home/abdellah-server/harbor"
+jenkins_container_name: "jenkins"
+jenkins_http_port: 8081
+jenkins_agent_port: 50000
+jenkins_volume: "jenkins_home"

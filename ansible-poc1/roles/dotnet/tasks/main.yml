@@ -1,0 +1,40 @@
+---
+- name: Vérifier si le SDK .NET est déjà installé
+  command: dotnet --version
+  register: dotnet_check
+  ignore_errors: true
+  changed_when: false
+
+- name: Télécharger le package repo Microsoft
+  get_url:
+    url: https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+    dest: /tmp/packages-microsoft-prod.deb
+  when: dotnet_check.rc != 0
+
+- name: Installer le package repo Microsoft
+  apt:
+    deb: /tmp/packages-microsoft-prod.deb
+  become: true
+  when: dotnet_check.rc != 0
+
+- name: Mettre à jour le cache apt
+  apt:
+    update_cache: true
+  become: true
+  when: dotnet_check.rc != 0
+
+- name: Installer le SDK .NET 8
+  apt:
+    name: dotnet-sdk-8.0
+    state: present
+  become: true
+  when: dotnet_check.rc != 0
+
+- name: Vérifier la version installée
+  command: dotnet --version
+  register: dotnet_final
+  changed_when: false
+
+- name: Afficher la version du SDK .NET
+  debug:
+    msg: "SDK .NET installé : {{ dotnet_final.stdout }}"
