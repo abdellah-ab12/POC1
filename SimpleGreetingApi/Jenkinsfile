@@ -30,20 +30,20 @@ pipeline {
         }
 
         stage('Compilation de l\'application') {
-            steps {
-                dir("${APP_DIR}") {
-                    sh "sudo nerdctl build --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
-                }
-            }
+    steps {
+        dir("${APP_DIR}") {
+            sh "sudo nerdctl build -f Dockerfile --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
         }
+    }
+}
 
-        stage('Construction de l\'image Docker (locale)') {
-            steps {
-                dir("${APP_DIR}") {
-                    sh "sudo nerdctl build -t ${LOCAL_IMAGE} ."
-                }
-            }
+stage('Construction de l\'image Docker (locale)') {
+    steps {
+        dir("${APP_DIR}") {
+            sh "sudo nerdctl build -f Dockerfile -t ${LOCAL_IMAGE} ."
         }
+    }
+}
 
         stage('Scan Trivy local (avant publication)') {
             steps {
