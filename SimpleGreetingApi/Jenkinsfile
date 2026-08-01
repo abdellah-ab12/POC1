@@ -42,7 +42,7 @@ pipeline {
         stage('Construction de l\'image Docker (locale)') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "sudo nerdctl build -f Dockerfile -t ${LOCAL_IMAGE} ."
+                    sh "sudo nerdctl build -f dockerfile -t ${LOCAL_IMAGE} ."
                 }
             }
         }
