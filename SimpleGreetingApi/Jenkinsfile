@@ -49,7 +49,8 @@ pipeline {
 
         stage('Scan Trivy local (avant publication)') {
             steps {
-                sh "trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}"
+                sh "sudo trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}"
+                sh "sudo chmod 644 trivy-report.json"
                 archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
             }
         }
