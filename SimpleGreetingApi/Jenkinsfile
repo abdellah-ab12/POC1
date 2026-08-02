@@ -34,7 +34,7 @@ pipeline {
         stage('Compilation de l\'application') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "sudo nerdctl build -f dockerfile --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
+                    sh "docker build -f dockerfile --target build -t ${IMAGE_NAME}-build:${IMAGE_TAG} ."
                 }
             }
         }
@@ -42,16 +42,14 @@ pipeline {
         stage('Construction de l\'image Docker (locale)') {
             steps {
                 dir("${APP_DIR}") {
-                    sh "sudo nerdctl build -f dockerfile -t ${LOCAL_IMAGE} ."
+                    sh "docker build -f dockerfile -t ${LOCAL_IMAGE} ."
                 }
             }
         }
 
         stage('Scan Trivy local (avant publication)') {
             steps {
-                sh "sudo nerdctl save -o image.tar ${LOCAL_IMAGE}"
-                sh "sudo trivy image --input image.tar --format json --output trivy-report.json"
-                sh "sudo chmod 644 trivy-report.json"
+                sh "trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}"
                 archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
             }
         }
@@ -89,11 +87,9 @@ print(count)
         stage('Publication de l\'image vers Harbor') {
             steps {
                 sh """
-                    sudo nerdctl tag ${LOCAL_IMAGE} ${FULL_IMAGE}
-                    sudo mkdir -p /root/.docker
-                    AUTH_STRING=\$(echo -n "\$HARBOR_CREDS_USR:\$HARBOR_CREDS_PSW" | base64 -w 0)
-                    echo "{\\"auths\\":{\\"${HARBOR_REGISTRY}\\":{\\"auth\\":\\"\${AUTH_STRING}\\"}}}" | sudo tee /root/.docker/config.json > /dev/null
-                    sudo nerdctl push ${FULL_IMAGE}
+                    docker tag ${LOCAL_IMAGE} ${FULL_IMAGE}
+                    echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
+                    docker push ${FULL_IMAGE}
                 """
             }
         }
@@ -106,7 +102,7 @@ print(count)
                 ]) {
                     script {
                         def digest = sh(
-                            script: "sudo nerdctl inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
                             returnStdout: true
                         ).trim()
 
@@ -133,7 +129,7 @@ print(count)
                 ]) {
                     script {
                         def digest = sh(
-                            script: "sudo nerdctl inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
+                            script: "docker inspect --format='{{index .RepoDigests 0}}' ${FULL_IMAGE}",
                             returnStdout: true
                         ).trim()
 
@@ -163,8 +159,7 @@ print(count)
             echo "Pipeline échoué — vérifier à quelle étape (build, scan, publication, signature ou déploiement K8s)."
         }
         always {
-            sh "sudo rm -f /root/.docker/config.json || true"
-            sh "sudo rm -f image.tar || true"
+            sh "docker logout ${HARBOR_REGISTRY} || true"
         }
     }
 }
