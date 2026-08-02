@@ -90,7 +90,9 @@ print(count)
             steps {
                 sh """
                     sudo nerdctl tag ${LOCAL_IMAGE} ${FULL_IMAGE}
-                    echo \$HARBOR_CREDS_PSW | sudo nerdctl login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin
+                    sudo mkdir -p /root/.docker
+                    AUTH_STRING=\$(echo -n "\$HARBOR_CREDS_USR:\$HARBOR_CREDS_PSW" | base64 -w 0)
+                    echo "{\\"auths\\":{\\"${HARBOR_REGISTRY}\\":{\\"auth\\":\\"\${AUTH_STRING}\\"}}}" | sudo tee /root/.docker/config.json > /dev/null
                     sudo nerdctl push ${FULL_IMAGE}
                 """
             }
@@ -161,7 +163,7 @@ print(count)
             echo "Pipeline échoué — vérifier à quelle étape (build, scan, publication, signature ou déploiement K8s)."
         }
         always {
-            sh "sudo nerdctl logout ${HARBOR_REGISTRY} || true"
+            sh "sudo rm -f /root/.docker/config.json || true"
             sh "sudo rm -f image.tar || true"
         }
     }
