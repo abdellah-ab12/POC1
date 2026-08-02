@@ -49,7 +49,8 @@ pipeline {
 
         stage('Scan Trivy local (avant publication)') {
             steps {
-                sh "sudo trivy image --format json --output trivy-report.json ${LOCAL_IMAGE}"
+                sh "sudo nerdctl save -o image.tar ${LOCAL_IMAGE}"
+                sh "sudo trivy image --input image.tar --format json --output trivy-report.json"
                 sh "sudo chmod 644 trivy-report.json"
                 archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
             }
@@ -161,6 +162,7 @@ print(count)
         }
         always {
             sh "sudo nerdctl logout ${HARBOR_REGISTRY} || true"
+            sh "sudo rm -f image.tar || true"
         }
     }
 }
