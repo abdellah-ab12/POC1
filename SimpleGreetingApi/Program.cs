@@ -29,7 +29,7 @@ app.MapGet("/weatherforecast", () =>
 })
 .WithName("GetWeatherForecast")
 .WithOpenApi();
-app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }))
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy", version = "v2" }))
    .WithName("HealthCheck")
    .WithOpenApi();
 app.Run();
