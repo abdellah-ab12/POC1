@@ -78,41 +78,35 @@ pipeline {
             }
         }
 
-        stage('Build, Scan Trivy, Quality Gate et Push (parallèle)') {
-            parallel {
-
-                stage('Users.Api') {
-                    steps {
-                        script {
-                            buildScanGatePush('users-api', 'MicroservicesPoc/src/Users.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
-                        }
-                    }
+        stage('Users.Api') {
+            steps {
+                script {
+                    buildScanGatePush('users-api', 'MicroservicesPoc/src/Users.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
                 }
+            }
+        }
 
-                stage('Orders.Api') {
-                    steps {
-                        script {
-                            buildScanGatePush('orders-api', 'MicroservicesPoc/src/Orders.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
-                        }
-                    }
+        stage('Orders.Api') {
+            steps {
+                script {
+                    buildScanGatePush('orders-api', 'MicroservicesPoc/src/Orders.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
                 }
+            }
+        }
 
-                stage('Notifications.Api') {
-                    steps {
-                        script {
-                            buildScanGatePush('notifications-api', 'MicroservicesPoc/src/Notifications.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
-                        }
-                    }
+        stage('Notifications.Api') {
+            steps {
+                script {
+                    buildScanGatePush('notifications-api', 'MicroservicesPoc/src/Notifications.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
                 }
+            }
+        }
 
-                stage('Frontend') {
-                    steps {
-                        script {
-                            buildScanGatePush('frontend', 'MicroservicesPoc/frontend', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
-                        }
-                    }
+        stage('Frontend') {
+            steps {
+                script {
+                    buildScanGatePush('frontend', 'MicroservicesPoc/frontend', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
                 }
-
             }
         }
     }
