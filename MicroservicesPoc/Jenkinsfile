@@ -1,9 +1,19 @@
 def SERVICES = [
-    [name: 'users-api',         path: 'MicroservicesPoc/src/Users.Api'],
-    [name: 'orders-api',        path: 'MicroservicesPoc/src/Orders.Api'],
-    [name: 'notifications-api', path: 'MicroservicesPoc/src/Notifications.Api'],
-    [name: 'frontend',          path: 'MicroservicesPoc/frontend']
+    [name: 'users-api',         label: 'Users.Api',         path: 'MicroservicesPoc/src/Users.Api'],
+    [name: 'orders-api',        label: 'Orders.Api',        path: 'MicroservicesPoc/src/Orders.Api'],
+    [name: 'notifications-api', label: 'Notifications.Api', path: 'MicroservicesPoc/src/Notifications.Api'],
+    [name: 'frontend',          label: 'Frontend',          path: 'MicroservicesPoc/frontend']
 ]
+
+def runInParallel(Closure action) {
+    def branches = [:]
+    SERVICES.each { svc ->
+        branches[svc.label] = {
+            action(svc)
+        }
+    }
+    parallel branches
+}
 
 pipeline {
     agent { label 'test-server' }
@@ -41,7 +51,7 @@ pipeline {
         stage('Construction des images Docker') {
             steps {
                 script {
-                    SERVICES.each { svc ->
+                    runInParallel { svc ->
                         dir(svc.path) {
                             echo "Build de ${svc.name}..."
                             sh "docker build -t ${svc.name}:${env.IMAGE_TAG} ."
@@ -54,9 +64,9 @@ pipeline {
         stage('Scan Trivy local (avant publication)') {
             steps {
                 script {
-                    SERVICES.each { svc ->
-                        def localImage  = "${svc.name}:${env.IMAGE_TAG}"
-                        def reportFile  = "trivy-report-${svc.name}.json"
+                    runInParallel { svc ->
+                        def localImage = "${svc.name}:${env.IMAGE_TAG}"
+                        def reportFile = "trivy-report-${svc.name}.json"
                         echo "Scan de ${svc.name}..."
                         sh "trivy image --format json --output ${reportFile} ${localImage}"
                         archiveArtifacts artifacts: "${reportFile}", allowEmptyArchive: true
@@ -68,9 +78,7 @@ pipeline {
         stage('Quality Gate — vérification des vulnérabilités critiques') {
             steps {
                 script {
-                    def failedServices = []
-
-                    SERVICES.each { svc ->
+                    runInParallel { svc ->
                         def reportFile = "trivy-report-${svc.name}.json"
                         def criticalCount = sh(
                             script: """
@@ -91,14 +99,9 @@ print(count)
                         echo "${svc.name} : ${criticalCount} vulnérabilité(s) Critical détectée(s)"
 
                         if (criticalCount > 0) {
-                            failedServices << "${svc.name} (${criticalCount})"
+                            error "Quality Gate échouée pour ${svc.name} : ${criticalCount} vulnérabilité(s) Critical détectée(s). Image NON publiée."
                         }
-                    }
-
-                    if (!failedServices.isEmpty()) {
-                        error "Quality Gate échouée pour : ${failedServices.join(', ')}. Aucune image ne sera publiée vers Harbor."
-                    } else {
-                        echo "Quality Gate validée pour les 4 images : aucune vulnérabilité Critical."
+                        echo "${svc.name} : Quality Gate validée."
                     }
                 }
             }
@@ -107,7 +110,7 @@ print(count)
         stage('Publication des images vers Harbor') {
             steps {
                 script {
-                    SERVICES.each { svc ->
+                    runInParallel { svc ->
                         def localImage = "${svc.name}:${env.IMAGE_TAG}"
                         def fullImage  = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
                         echo "Publication de ${svc.name}..."
@@ -122,12 +125,12 @@ print(count)
 
         stage('Signature des images avec Cosign') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
-                    string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD')
-                ]) {
-                    script {
-                        SERVICES.each { svc ->
+                script {
+                    runInParallel { svc ->
+                        withCredentials([
+                            file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
+                            string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD')
+                        ]) {
                             def fullImage = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
                             def digest = sh(
                                 script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
@@ -152,11 +155,11 @@ print(count)
 
         stage('Vérification de la signature Cosign') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
-                ]) {
-                    script {
-                        SERVICES.each { svc ->
+                script {
+                    runInParallel { svc ->
+                        withCredentials([
+                            file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
+                        ]) {
                             def fullImage = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
                             def digest = sh(
                                 script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
