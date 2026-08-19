@@ -1,0 +1,131 @@
+def buildScanGatePush(String name, String path, String registry, String project, String tag) {
+    def localImage = "${name}:${tag}"
+    def fullImage  = "${registry}/${project}/${name}:${tag}"
+    def reportFile = "trivy-report-${name}.json"
+
+    dir(path) {
+        // 1. Construite par Jenkins
+        sh "docker build -t ${localImage} ."
+
+        // 2. Analysée avec Trivy
+        sh "trivy image --format json --output ${reportFile} ${localImage}"
+        archiveArtifacts artifacts: "${reportFile}", allowEmptyArchive: true
+
+        def criticalCount = sh(
+            script: """
+                cat ${reportFile} | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = 0
+for result in data.get('Results', []):
+    for vuln in result.get('Vulnerabilities', []) or []:
+        if vuln.get('Severity') == 'CRITICAL':
+            count += 1
+print(count)
+"
+            """,
+            returnStdout: true
+        ).trim().toInteger()
+
+        echo "${name} : ${criticalCount} vulnérabilité(s) Critical détectée(s)"
+
+        // 3. Bloquée si une vulnérabilité Critical est détectée
+        if (criticalCount > 0) {
+            error "Quality Gate échouée pour ${name} : ${criticalCount} vulnérabilité(s) Critical détectée(s). Image NON publiée vers Harbor."
+        }
+
+        echo "${name} : Quality Gate validée, aucune vulnérabilité Critical."
+
+        // 4. Publiée dans Harbor si elle passe la Quality Gate
+        sh """
+            docker tag ${localImage} ${fullImage}
+            docker push ${fullImage}
+        """
+        echo "${name} publié avec succès vers Harbor : ${fullImage}"
+    }
+}
+
+pipeline {
+    agent { label 'test-server' }
+
+    environment {
+        HARBOR_REGISTRY = "192.168.88.143"
+        HARBOR_PROJECT  = "microservicespoc"
+        HARBOR_CREDS    = credentials('harbor-creds')
+    }
+
+    stages {
+
+        stage('Initialisation des variables') {
+            steps {
+                script {
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Récupération du code source') {
+            steps {
+                retry(3) {
+                    git branch: 'main', url: 'https://github.com/abdellah-ab12/POC1.git'
+                }
+            }
+        }
+
+        stage('Connexion à Harbor') {
+            steps {
+                sh "echo \$HARBOR_CREDS_PSW | docker login ${HARBOR_REGISTRY} -u \$HARBOR_CREDS_USR --password-stdin"
+            }
+        }
+
+        stage('Build, Scan Trivy, Quality Gate et Push (parallèle)') {
+            parallel {
+
+                stage('Users.Api') {
+                    steps {
+                        script {
+                            buildScanGatePush('users-api', 'MicroservicesPoc/src/Users.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                        }
+                    }
+                }
+
+                stage('Orders.Api') {
+                    steps {
+                        script {
+                            buildScanGatePush('orders-api', 'MicroservicesPoc/src/Orders.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                        }
+                    }
+                }
+
+                stage('Notifications.Api') {
+                    steps {
+                        script {
+                            buildScanGatePush('notifications-api', 'MicroservicesPoc/src/Notifications.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                        }
+                    }
+                }
+
+                stage('Frontend') {
+                    steps {
+                        script {
+                            buildScanGatePush('frontend', 'MicroservicesPoc/frontend', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline terminé avec succès : les 4 images (users-api, orders-api, notifications-api, frontend) ont été construites, analysées par Trivy, validées par la Quality Gate et publiées vers Harbor, tag ${IMAGE_TAG}."
+        }
+        failure {
+            echo "Pipeline échoué — au moins une image a échoué son build, son scan Trivy, ou sa Quality Gate (vulnérabilité Critical détectée)."
+        }
+        always {
+            sh "docker logout ${HARBOR_REGISTRY} || true"
+        }
+    }
+}
