@@ -1,80 +1,9 @@
-def buildScanGatePush(String name, String path, String registry, String project, String tag) {
-    def localImage = "${name}:${tag}"
-    def fullImage  = "${registry}/${project}/${name}:${tag}"
-    def reportFile = "trivy-report-${name}.json"
-
-    dir(path) {
-        // 1. Construite par Jenkins
-        sh "docker build -t ${localImage} ."
-
-        // 2. Analysée avec Trivy
-        sh "trivy image --format json --output ${reportFile} ${localImage}"
-        archiveArtifacts artifacts: "${reportFile}", allowEmptyArchive: true
-
-        def criticalCount = sh(
-            script: """
-                cat ${reportFile} | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-count = 0
-for result in data.get('Results', []):
-    for vuln in result.get('Vulnerabilities', []) or []:
-        if vuln.get('Severity') == 'CRITICAL':
-            count += 1
-print(count)
-"
-            """,
-            returnStdout: true
-        ).trim().toInteger()
-
-        echo "${name} : ${criticalCount} vulnérabilité(s) Critical détectée(s)"
-
-        // 3. Bloquée si une vulnérabilité Critical est détectée
-        if (criticalCount > 0) {
-            error "Quality Gate échouée pour ${name} : ${criticalCount} vulnérabilité(s) Critical détectée(s). Image NON publiée vers Harbor."
-        }
-
-        echo "${name} : Quality Gate validée, aucune vulnérabilité Critical."
-
-        // 4. Publiée dans Harbor si elle passe la Quality Gate
-        sh """
-            docker tag ${localImage} ${fullImage}
-            docker push ${fullImage}
-        """
-        echo "${name} publié avec succès vers Harbor : ${fullImage}"
-
-        // 5. Signature et vérification Cosign
-        signAndVerifyCosign(name, fullImage)
-    }
-}
-
-def signAndVerifyCosign(String name, String fullImage) {
-    withCredentials([
-        file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
-        string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD'),
-        file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
-    ]) {
-        def digest = sh(
-            script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
-            returnStdout: true
-        ).trim()
-
-        echo "${name} : signature du digest ${digest}"
-
-        sh """
-            cosign sign --yes \
-              --new-bundle-format=false \
-              --use-signing-config=false \
-              --registry-referrers-mode=legacy \
-              --key \$COSIGN_KEY_FILE \
-              ${digest}
-        """
-
-        sh "cosign verify --key \$COSIGN_PUB_FILE ${digest}"
-
-        echo "${name} : signature vérifiée avec succès."
-    }
-}
+def SERVICES = [
+    [name: 'users-api',         path: 'MicroservicesPoc/src/Users.Api'],
+    [name: 'orders-api',        path: 'MicroservicesPoc/src/Orders.Api'],
+    [name: 'notifications-api', path: 'MicroservicesPoc/src/Notifications.Api'],
+    [name: 'frontend',          path: 'MicroservicesPoc/frontend']
+]
 
 pipeline {
     agent { label 'test-server' }
@@ -109,34 +38,135 @@ pipeline {
             }
         }
 
-        stage('Users.Api') {
+        stage('Construction des images Docker') {
             steps {
                 script {
-                    buildScanGatePush('users-api', 'MicroservicesPoc/src/Users.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                    SERVICES.each { svc ->
+                        dir(svc.path) {
+                            echo "Build de ${svc.name}..."
+                            sh "docker build -t ${svc.name}:${env.IMAGE_TAG} ."
+                        }
+                    }
                 }
             }
         }
 
-        stage('Orders.Api') {
+        stage('Scan Trivy local (avant publication)') {
             steps {
                 script {
-                    buildScanGatePush('orders-api', 'MicroservicesPoc/src/Orders.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                    SERVICES.each { svc ->
+                        def localImage  = "${svc.name}:${env.IMAGE_TAG}"
+                        def reportFile  = "trivy-report-${svc.name}.json"
+                        echo "Scan de ${svc.name}..."
+                        sh "trivy image --format json --output ${reportFile} ${localImage}"
+                        archiveArtifacts artifacts: "${reportFile}", allowEmptyArchive: true
+                    }
                 }
             }
         }
 
-        stage('Notifications.Api') {
+        stage('Quality Gate — vérification des vulnérabilités critiques') {
             steps {
                 script {
-                    buildScanGatePush('notifications-api', 'MicroservicesPoc/src/Notifications.Api', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                    def failedServices = []
+
+                    SERVICES.each { svc ->
+                        def reportFile = "trivy-report-${svc.name}.json"
+                        def criticalCount = sh(
+                            script: """
+                                cat ${reportFile} | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = 0
+for result in data.get('Results', []):
+    for vuln in result.get('Vulnerabilities', []) or []:
+        if vuln.get('Severity') == 'CRITICAL':
+            count += 1
+print(count)
+"
+                            """,
+                            returnStdout: true
+                        ).trim().toInteger()
+
+                        echo "${svc.name} : ${criticalCount} vulnérabilité(s) Critical détectée(s)"
+
+                        if (criticalCount > 0) {
+                            failedServices << "${svc.name} (${criticalCount})"
+                        }
+                    }
+
+                    if (!failedServices.isEmpty()) {
+                        error "Quality Gate échouée pour : ${failedServices.join(', ')}. Aucune image ne sera publiée vers Harbor."
+                    } else {
+                        echo "Quality Gate validée pour les 4 images : aucune vulnérabilité Critical."
+                    }
                 }
             }
         }
 
-        stage('Frontend') {
+        stage('Publication des images vers Harbor') {
             steps {
                 script {
-                    buildScanGatePush('frontend', 'MicroservicesPoc/frontend', env.HARBOR_REGISTRY, env.HARBOR_PROJECT, env.IMAGE_TAG)
+                    SERVICES.each { svc ->
+                        def localImage = "${svc.name}:${env.IMAGE_TAG}"
+                        def fullImage  = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
+                        echo "Publication de ${svc.name}..."
+                        sh """
+                            docker tag ${localImage} ${fullImage}
+                            docker push ${fullImage}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Signature des images avec Cosign') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
+                    string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD')
+                ]) {
+                    script {
+                        SERVICES.each { svc ->
+                            def fullImage = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
+                            def digest = sh(
+                                script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
+                                returnStdout: true
+                            ).trim()
+
+                            echo "Signature de ${svc.name} — digest : ${digest}"
+
+                            sh """
+                                cosign sign --yes \
+                                  --new-bundle-format=false \
+                                  --use-signing-config=false \
+                                  --registry-referrers-mode=legacy \
+                                  --key \$COSIGN_KEY_FILE \
+                                  ${digest}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Vérification de la signature Cosign') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
+                ]) {
+                    script {
+                        SERVICES.each { svc ->
+                            def fullImage = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${svc.name}:${env.IMAGE_TAG}"
+                            def digest = sh(
+                                script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
+                                returnStdout: true
+                            ).trim()
+
+                            echo "Vérification de ${svc.name}..."
+                            sh "cosign verify --key \$COSIGN_PUB_FILE ${digest}"
+                        }
+                    }
                 }
             }
         }
@@ -144,10 +174,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline terminé avec succès : les 4 images (users-api, orders-api, notifications-api, frontend) ont été construites, analysées par Trivy, validées par la Quality Gate, publiées et signées vers Harbor, tag ${IMAGE_TAG}."
+            echo "Pipeline terminé avec succès : les 4 images ont été construites, scannées, publiées et signées vers Harbor, tag ${env.IMAGE_TAG}."
         }
         failure {
-            echo "Pipeline échoué — au moins une image a échoué son build, son scan Trivy, sa Quality Gate, sa publication ou sa signature Cosign."
+            echo "Pipeline échoué — vérifier à quelle étape (build, scan, Quality Gate, publication ou signature)."
         }
         always {
             sh "docker logout ${HARBOR_REGISTRY} || true"
