@@ -50,7 +50,7 @@ pipeline {
 
     environment {
         HARBOR_REGISTRY = "192.168.88.143"
-        HARBOR_PROJECT  = "microservicespoc"
+        HARBOR_PROJECT  = "microservices"
         HARBOR_CREDS    = credentials('harbor-creds')
     }
 
