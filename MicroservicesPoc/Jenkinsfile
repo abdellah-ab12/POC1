@@ -1,3 +1,6 @@
+import groovy.transform.Field
+
+@Field
 def SERVICES = [
     [name: 'users-api',         label: 'Users.Api',         path: 'MicroservicesPoc/src/Users.Api'],
     [name: 'orders-api',        label: 'Orders.Api',        path: 'MicroservicesPoc/src/Orders.Api'],
