@@ -42,6 +42,37 @@ print(count)
             docker push ${fullImage}
         """
         echo "${name} publié avec succès vers Harbor : ${fullImage}"
+
+        // 5. Signature et vérification Cosign
+        signAndVerifyCosign(name, fullImage)
+    }
+}
+
+def signAndVerifyCosign(String name, String fullImage) {
+    withCredentials([
+        file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY_FILE'),
+        string(credentialsId: 'cosign-key-password', variable: 'COSIGN_PASSWORD'),
+        file(credentialsId: 'cosign-public-key', variable: 'COSIGN_PUB_FILE')
+    ]) {
+        def digest = sh(
+            script: "docker inspect --format='{{index .RepoDigests 0}}' ${fullImage}",
+            returnStdout: true
+        ).trim()
+
+        echo "${name} : signature du digest ${digest}"
+
+        sh """
+            cosign sign --yes \
+              --new-bundle-format=false \
+              --use-signing-config=false \
+              --registry-referrers-mode=legacy \
+              --key \$COSIGN_KEY_FILE \
+              ${digest}
+        """
+
+        sh "cosign verify --key \$COSIGN_PUB_FILE ${digest}"
+
+        echo "${name} : signature vérifiée avec succès."
     }
 }
 
@@ -113,10 +144,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline terminé avec succès : les 4 images (users-api, orders-api, notifications-api, frontend) ont été construites, analysées par Trivy, validées par la Quality Gate et publiées vers Harbor, tag ${IMAGE_TAG}."
+            echo "Pipeline terminé avec succès : les 4 images (users-api, orders-api, notifications-api, frontend) ont été construites, analysées par Trivy, validées par la Quality Gate, publiées et signées vers Harbor, tag ${IMAGE_TAG}."
         }
         failure {
-            echo "Pipeline échoué — au moins une image a échoué son build, son scan Trivy, ou sa Quality Gate (vulnérabilité Critical détectée)."
+            echo "Pipeline échoué — au moins une image a échoué son build, son scan Trivy, sa Quality Gate, sa publication ou sa signature Cosign."
         }
         always {
             sh "docker logout ${HARBOR_REGISTRY} || true"
