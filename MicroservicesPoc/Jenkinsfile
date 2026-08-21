@@ -57,17 +57,7 @@ pipeline {
                     runInParallel { svc ->
                         dir(svc.path) {
                             echo "Build de ${svc.name}..."
-                            if (svc.name == 'frontend') {
-                                sh """
-                                    docker build \
-                                      --build-arg VITE_USERS_API_URL=http://192.168.88.144:5001 \
-                                      --build-arg VITE_ORDERS_API_URL=http://192.168.88.144:5002 \
-                                      --build-arg VITE_NOTIFICATIONS_API_URL=http://192.168.88.144:5003 \
-                                      -t ${svc.name}:${env.IMAGE_TAG} .
-                                """
-                            } else {
-                                sh "docker build -t ${svc.name}:${env.IMAGE_TAG} ."
-                            }
+                            sh "docker build -t ${svc.name}:${env.IMAGE_TAG} ."
                         }
                     }
                 }
@@ -200,3 +190,4 @@ print(count)
         }
     }
 }
+
